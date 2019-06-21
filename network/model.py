@@ -40,7 +40,34 @@ def generator(input,reuse=False,is_training=True,args=None,name='SRResnet'):
         with tf.variable_scope('ouput_stage'):
             output = conv_b(L4_U2,3,k_h=9,k_w=9,name='conv2d_out')
         return output
-## discriminator
-# def discriminator(input,args=None):
-#     def
+# discriminator
+def discriminator(input,reuse=False,is_training=True,args=None,name='discriminator'):
+    with tf.variable_scope(name,reuse=reuse):
 
+        L1 = LReLU(conv_b(input,64,name='conv2d_1'),leak=0.2,name='LReLU_1')
+
+        ### block
+        L1_block = LReLU(conv_bn(L1,64,strides=[1,2,2,1],is_train=is_training,name='con2d_block_L1'),leak=0.2,name='LReLU_block1')
+        L2_block = LReLU(conv_bn(L1_block,128,is_train=is_training,name='con2d_block_L2'),leak=0.2,name='LReLU_block2')
+        L3_block = LReLU(conv_bn(L2_block,128,strides=[1,2,2,1],is_train=is_training,name='con2d_block_L3'),leak=0.2,name='LReLU_block3')
+        L4_block = LReLU(conv_bn(L3_block,256,is_train=is_training,name='con2d_block_L4'),leak=0.2,name='LReLU_block4')
+        L5_block = LReLU(conv_bn(L4_block,256,strides=[1,2,2,1],is_train=is_training,name='con2d_block_L5'),leak=0.2,name='LReLU_block5')
+        L6_block = LReLU(conv_bn(L5_block,512,is_train=is_training,name='con2d_block_L6'),leak=0.2,name='LReLU_block6')
+        L7_block = LReLU(conv_bn(L6_block,512,strides=[1,2,2,1],is_train=is_training,name='con2d_block_L7'),leak=0.2,name='LReLU_block7')
+
+        ### Dense
+        L1_Dense = LReLU(tf.layers.dense(tf.layers.flatten(L7_block),units=1024),leak=0.2,name='LReLU_Dense1')
+        L2_Dense = tf.nn.sigmoid(tf.layers.dense(L1_Dense,units=1),leak=0.2,name='LReLU_Dense2')
+    return L2_Dense
+
+def discr_loss(output,label,EPS):
+    ## 1
+    discrim_fake_loss = tf.log(1 - output + EPS)
+    discrim_real_loss = tf.log(label + EPS)
+    discrim_loss = tf.reduce_mean(-(discrim_fake_loss + discrim_real_loss))
+    ## 2
+    posLoss = tf.reduce_mean(tf.square(label - tf.random_uniform(shape=[label.get_shape().as_list()[0], 1], minval=0.9, maxval=1.0)))
+    negLoss = tf.reduce_mean(tf.square(output - tf.random_uniform(shape=[output.get_shape().as_list()[0], 1], minval=0, maxval=0.2, dtype=tf.float32)))
+    loss = posLoss+negLoss
+def gen_loss(output,label,EPS):
+    loss1 = tf.reduce_mean(tf.square(output-label))

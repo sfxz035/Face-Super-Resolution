@@ -4,6 +4,8 @@ import network.model as model
 import numpy as np
 import os
 import argparse
+import cv2 as cv
+import scipy.misc
 
 from utils.compute import *
 os.environ["CUDA_VISIBLE_DEVICES"] = '1'   #指定第一块GPU可用
@@ -12,15 +14,7 @@ config.gpu_options.per_process_gpu_memory_fraction = 0.9  # 程序最多只能�
 config.gpu_options.allow_growth = True      #程序按需申请内存
 sess = tf.InteractiveSession(config = config)
 
-# epoch = 2000000
-# batch_size = 10
-# learning_rate = 0.0001
-# a = 0.1
-# savenet_path = './libSaveNet/savenet/'
-# train_file = './data/train_HR'
-# test_file = './data/test_HR'
-# crop_size = 96
-# scale = 2
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--train_file",default="./data/train_HR")
 parser.add_argument("--test_file",default="./data/test_HR")
@@ -30,30 +24,31 @@ parser.add_argument("--nubBlocks_ED",default=32,type=int)
 parser.add_argument("--nubBlocks_SR",default=16,type=int)
 parser.add_argument("--EDFILTER_DIM",default=256,type=int)
 parser.add_argument("--SPFILTER_DIM",default=64,type=int)
-parser.add_argument("--batch_size",default=1,type=int)
+parser.add_argument("--batch_size",default=10,type=int)
 parser.add_argument("--savenet_path",default='./libSaveNet/savenet/')
-parser.add_argument("--epoch",default=2000000,type=int)
-parser.add_argument("--learning_rate",default=0.0001,type=int)
-parser.add_argument("--crop_size",default=96,type=int)
-parser.add_argument("--shrunk_size",default=96//4,type=int)
+parser.add_argument("--epoch",default=200000,type=int)
+parser.add_argument("--learning_rate",default=0.0001,type=float)
+parser.add_argument("--crop_size",default=384,type=int)
+parser.add_argument("--shrunk_size",default=386//4,type=int)
+parser.add_argument("--num_train",default=10000,type=int)
+parser.add_argument("--num_test",default=1500,type=int)
 
 
 args = parser.parse_args()
 
-
-x_train,y_train = dataset.load_imgs(args.train_file,crop_size=args.crop_size,shrunk_size=args.shrunk_size)
-x_test,y_test = dataset.load_imgs(args.test_file,crop_size=args.crop_size,shrunk_size=args.shrunk_size)
-
 def train(args):
+    # train_set = dataset.get_files(args.train_file,crop_size=args.crop_size)
+    # test_set = dataset.get_files(args.test_file,crop_size=args.crop_size)
+    x_train, y_train = dataset.load_imgs(args.train_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=args.num_train)
+    x_test, y_test = dataset.load_imgs(args.test_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=args.num_test)
+
     x = tf.placeholder(tf.float32,shape = [args.batch_size,args.shrunk_size,args.shrunk_size, 3])
     y_ = tf.placeholder(tf.float32,shape = [args.batch_size,args.crop_size,args.crop_size,3])
-    # is_training = tf.placeholder(tf.bool)
-    # dropout_value = tf.placeholder(tf.float32)  # 参与节点的数目百分比
     y = model.generator(x,args=args)
     loss = tf.reduce_mean(tf.square(y - y_))
-    PSNR = compute_psnr(y,y_)
-    # summary_op = tf.summary.scalar('trainloss', loss)
-    # summary_op2 = tf.summary.scalar('testloss', loss)
+
+
+    PSNR = compute_psnr(y,y_,convert=True)
 
     tf.summary.scalar('trainloss', loss)
     tf.summary.scalar('PSNR', PSNR)
@@ -62,11 +57,10 @@ def train(args):
     batch_norm_updates_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS))
     with tf.control_dependencies([batch_norm_updates_op]):
         train_step = tf.train.AdamOptimizer(args.learning_rate).minimize(loss)
-    # train_step = tf.train.AdamOptimizer(args.learning_rate).minimize(loss)
     variables_to_restore = []
     for v in tf.global_variables():
         variables_to_restore.append(v)
-    saver = tf.train.Saver(variables_to_restore, write_version=tf.train.SaverDef.V2, max_to_keep=8)
+    saver = tf.train.Saver(variables_to_restore, write_version=tf.train.SaverDef.V2, max_to_keep=20)
 
     train_writer = tf.summary.FileWriter('./my_graph/train', sess.graph)
     test_writer = tf.summary.FileWriter('./my_graph/test')
@@ -79,15 +73,17 @@ def train(args):
     for ep in range(args.epoch):
         batch_idxs = len(x_train) // args.batch_size
         for idx in range(batch_idxs):
+            # batch_input,batch_labels = dataset.get_batch(train_set,args.batch_size,args.crop_size,args.shrunk_size)
             batch_input = x_train[idx * args.batch_size: (idx + 1) * args.batch_size]
             batch_labels = y_train[idx * args.batch_size: (idx + 1) * args.batch_size]
             # batch_input, batch_labels = dataset.random_batch(x_train,y_train,batch_size)
+
             sess.run(train_step, feed_dict={x: batch_input, y_: batch_labels})
             count += 1
             # print(count)
-            if count % 1 == 0:
+            if count % 100 == 0:
                 m += 1
-                # batch_input_test, batch_labels_test = dataset.random_batch(x_test, y_test, batch_size)
+                # batch_input_test, batch_labels_test = dataset.random_batch(x_test, y_test, args.batch_size)
                 batch_input_test = x_test[0 : args.batch_size]
                 batch_labels_test = y_test[0 : args.batch_size]
                 loss1 = sess.run(loss, feed_dict={x: batch_input,y_: batch_labels})
@@ -100,6 +96,76 @@ def train(args):
                 test_writer.add_summary(sess.run(summary_op, feed_dict={x: batch_input_test,
                                                                      y_: batch_labels_test}), m)
             if (count + 1) % 10000 == 0:
-                saver.save(sess, os.path.join(args.savenet_path, 'conv_unet%d.ckpt-done' % (count)))
+                saver.save(sess, os.path.join(args.savenet_path, 'conv_net%d.ckpt-done' % (count)))
+def GAN_train(args):
+    x_train, y_train = dataset.load_imgs(args.train_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size)
+    x_test, y_test = dataset.load_imgs(args.test_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size)
 
-train(args)
+    genInput = tf.placeholder(tf.float32,shape = [args.batch_size,args.shrunk_size,args.shrunk_size, 3])
+    genLabel = tf.placeholder(tf.float32,shape = [args.batch_size,args.crop_size,args.crop_size,3])
+    genOutput = model.generator(genInput,args=args,name='generator')
+
+    discr_outlabel = model.discriminator(genLabel,name='discriminator')
+    discr_outGenout = model.discriminator(genOutput,reuse=True,name='discriminator')
+
+def test(args):
+    savepath = './libSaveNet/savenet/conv_unet139999.ckpt-done'
+    path_2k = './data/valid/0728.png'
+    path_set = './data/valid/comic.png'
+    path_face = './data/valid/2019-04-18-09-33-59-828886_1.bmp'
+    img = cv.imread(path_set)
+    img_shape = np.shape(img)
+    a_scale = img_shape[0]//args.scale
+    b_scale = img_shape[1]//args.scale
+    img = img[0:a_scale*args.scale,0:b_scale*args.scale]
+    img_LR = scipy.misc.imresize(img,(a_scale,b_scale))
+    img_LR_input = np.expand_dims(img_LR,0)
+    img_label = np.expand_dims(img,0)
+    x = tf.placeholder(tf.float32,shape = [1,a_scale,b_scale, 3])
+    y_ = tf.placeholder(tf.float32,shape = [1,a_scale*args.scale,b_scale*args.scale,3])
+    y = model.generator(x,args=args,is_training=False)
+    loss = tf.reduce_mean(tf.square(y - y_))
+    PSNR = compute_psnr(y,y_)
+    variables_to_restore = []
+    for v in tf.global_variables():
+        variables_to_restore.append(v)
+    saver = tf.train.Saver(variables_to_restore, write_version=tf.train.SaverDef.V2, max_to_keep=None)
+    tf.global_variables_initializer().run()
+    saver.restore(sess, savepath)
+    output = sess.run(y,feed_dict={x:img_LR_input})
+
+    # Convert back to uint8
+    converted_inputs = tf.image.convert_image_dtype(x, dtype=tf.uint8, saturate=True)
+    converted_targets = tf.image.convert_image_dtype(y_, dtype=tf.uint8, saturate=True)
+    converted_outputs = tf.image.convert_image_dtype(y, dtype=tf.uint8, saturate=True)
+
+    loss_test = sess.run(loss,feed_dict={x:output,y_:img_label})
+    PSNR_test = sess.run(PSNR,feed_dict={x:output,y_:img_label})
+
+    np.save('./output/sp_img.npy',output)
+    # cv.imwrite('./output/sp_img.png',output,0)
+    # cv.imwrite('./output/lr_img.png',img_LR,0)
+    # cv.imwrite('./output/hr_img.png',img,0)
+    print('loss_test:[%.8f],PSNR_train:[%.8f]' % (loss_test,PSNR_test))
+
+def predict(args):
+    savepath = './libSaveNet/savenet/conv_unet139999.ckpt-done'
+    path_face = './data/valid/2019-04-18-09-33-59-828886_1.bmp'
+    img = cv.imread(path_face)
+    img_shape = np.shape(img)
+    img_input = np.expand_dims(img,0)
+    x = tf.placeholder(tf.float32,shape = [1,img_shape[0],img_shape[1], 3])
+    y = model.generator(x,args=args,is_training=False)
+    variables_to_restore = []
+    for v in tf.global_variables():
+        variables_to_restore.append(v)
+    saver = tf.train.Saver(variables_to_restore, write_version=tf.train.SaverDef.V2, max_to_keep=None)
+    tf.global_variables_initializer().run()
+    saver.restore(sess, savepath)
+    output = sess.run(y,feed_dict={x:img_input})
+    np.save('./output/sp_img.npy',output)
+
+if __name__ == '__main__':
+    train(args)
+    # test(args)
+    # predict(args)
