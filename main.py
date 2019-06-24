@@ -32,6 +32,8 @@ parser.add_argument("--crop_size",default=384,type=int)
 parser.add_argument("--shrunk_size",default=386//4,type=int)
 parser.add_argument("--num_train",default=10000,type=int)
 parser.add_argument("--num_test",default=1500,type=int)
+parser.add_argument("--EPS",default=1e-12,type=float)
+
 
 
 args = parser.parse_args()
@@ -108,9 +110,36 @@ def GAN_train(args):
     discr_outlabel = model.discriminator(genLabel,name='discriminator')
     discr_outGenout = model.discriminator(genOutput,reuse=True,name='discriminator')
 
+    var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES)
+    saver = tf.train.Saver(var_list,max_to_keep=10)
+
+    var_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator') + \
+                tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator')
+    genvar_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='generator')
+    disvar_list = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='discriminator')
+    modelsave = tf.train.Saver(var_list,max_to_keep=10)
+
+    gen_updates_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope='generator'))
+    # with tf.control_dependencies([gen_updates_op]):
+    #     gentrain_step = tf.train.AdamOptimizer(args.learning_rate).minimize(loss,var_list=genvar_list)
+    # dis_updates_op = tf.group(*tf.get_collection(tf.GraphKeys.UPDATE_OPS,scope='discriminator'))
+    # with tf.control_dependencies([dis_updates_op]):
+    # gentrain_step = tf.train.AdamOptimizer(args.learning_rate).minimize(loss,var_list=disvar_list)
+
+    vgg_var_list = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='vgg_19')
+    vgg_restore = tf.train.Saver(vgg_var_list)
+
+    tf.global_variables_initializer().run()
+
+    # vgg_restore.restore(sess, FLAGS.vgg_ckpt)
+    # last_file = tf.train.latest_checkpoint(vgg_ckpt_path)
+    # if last_file:
+    #     saver.restore(sess, last_file)
+
+
 def test(args):
-    savepath = './libSaveNet/savenet/conv_unet139999.ckpt-done'
-    path_2k = './data/valid/0728.png'
+    savepath = './libSaveNet/savenet/conv_net429999.ckpt-done'
+    path_2k = './data/valid/0801.png'
     path_set = './data/valid/comic.png'
     path_face = './data/valid/2019-04-18-09-33-59-828886_1.bmp'
     img = cv.imread(path_set)
@@ -118,14 +147,18 @@ def test(args):
     a_scale = img_shape[0]//args.scale
     b_scale = img_shape[1]//args.scale
     img = img[0:a_scale*args.scale,0:b_scale*args.scale]
-    img_LR = scipy.misc.imresize(img,(a_scale,b_scale))
-    img_LR_input = np.expand_dims(img_LR,0)
-    img_label = np.expand_dims(img,0)
+    img_LR = scipy.misc.imresize(img,(a_scale,b_scale),'bicubic')
+    ## 归一化
+    img_norm = img / (255. / 2.) - 1
+    img_LR_norm = img_LR / (255. / 2.) - 1
+
+    img_LR_input = np.expand_dims(img_LR_norm,0)
+    img_label = np.expand_dims(img_norm,0)
     x = tf.placeholder(tf.float32,shape = [1,a_scale,b_scale, 3])
     y_ = tf.placeholder(tf.float32,shape = [1,a_scale*args.scale,b_scale*args.scale,3])
     y = model.generator(x,args=args,is_training=False)
     loss = tf.reduce_mean(tf.square(y - y_))
-    PSNR = compute_psnr(y,y_)
+    PSNR = compute_psnr(y,y_,convert=True)
     variables_to_restore = []
     for v in tf.global_variables():
         variables_to_restore.append(v)
@@ -134,24 +167,20 @@ def test(args):
     saver.restore(sess, savepath)
     output = sess.run(y,feed_dict={x:img_LR_input})
 
-    # Convert back to uint8
-    converted_inputs = tf.image.convert_image_dtype(x, dtype=tf.uint8, saturate=True)
-    converted_targets = tf.image.convert_image_dtype(y_, dtype=tf.uint8, saturate=True)
-    converted_outputs = tf.image.convert_image_dtype(y, dtype=tf.uint8, saturate=True)
+    loss_test = sess.run(loss,feed_dict={y:output,y_:img_label})
+    PSNR_test = sess.run(PSNR,feed_dict={y:output,y_:img_label})
 
-    loss_test = sess.run(loss,feed_dict={x:output,y_:img_label})
-    PSNR_test = sess.run(PSNR,feed_dict={x:output,y_:img_label})
 
     np.save('./output/sp_img.npy',output)
     # cv.imwrite('./output/sp_img.png',output,0)
     # cv.imwrite('./output/lr_img.png',img_LR,0)
     # cv.imwrite('./output/hr_img.png',img,0)
     print('loss_test:[%.8f],PSNR_train:[%.8f]' % (loss_test,PSNR_test))
-
 def predict(args):
-    savepath = './libSaveNet/savenet/conv_unet139999.ckpt-done'
+    savepath = './libSaveNet/savenet/conv_net429999.ckpt-done'
     path_face = './data/valid/2019-04-18-09-33-59-828886_1.bmp'
     img = cv.imread(path_face)
+    img = img / (255. / 2.) - 1
     img_shape = np.shape(img)
     img_input = np.expand_dims(img,0)
     x = tf.placeholder(tf.float32,shape = [1,img_shape[0],img_shape[1], 3])
@@ -166,6 +195,6 @@ def predict(args):
     np.save('./output/sp_img.npy',output)
 
 if __name__ == '__main__':
-    train(args)
+    # train(args)
     # test(args)
-    # predict(args)
+    predict(args)
