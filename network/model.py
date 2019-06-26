@@ -56,8 +56,8 @@ def discriminator(input,reuse=False,is_training=True,args=None,name='discriminat
         L7_block = LReLU(conv_bn(L6_block,512,strides=[1,2,2,1],is_train=is_training,name='con2d_block_L7'),leak=0.2,name='LReLU_block7')
 
         ### Dense
-        L1_Dense = LReLU(tf.layers.dense(tf.layers.flatten(L7_block),units=1024),leak=0.2,name='LReLU_Dense1')
-        L2_Dense = tf.nn.sigmoid(tf.layers.dense(L1_Dense,units=1),leak=0.2,name='LReLU_Dense2')
+        L1_Dense = LReLU(tf.layers.dense(tf.layers.flatten(L7_block),units=512),leak=0.2,name='LReLU_Dense1')
+        L2_Dense = tf.nn.sigmoid(tf.layers.dense(L1_Dense,units=1),name='sigmoid_Dense2')
     return L2_Dense
 
 def discr_loss(output,label,EPS):
@@ -67,16 +67,40 @@ def discr_loss(output,label,EPS):
     discrim_loss = tf.reduce_mean(-(discrim_fake_loss + discrim_real_loss))
 
     ## 2
-    posLoss = tf.reduce_mean(tf.square(label - tf.random_uniform(shape=[label.get_shape().as_list()[0], 1], minval=0.9, maxval=1.0)))
-    negLoss = tf.reduce_mean(tf.square(output - tf.random_uniform(shape=[output.get_shape().as_list()[0], 1], minval=0, maxval=0.2, dtype=tf.float32)))
-    loss = posLoss+negLoss
+    # posLoss = tf.reduce_mean(tf.square(label - tf.random_uniform(shape=[label.get_shape().as_list()[0], 1], minval=0.9, maxval=1.0)))
+    # negLoss = tf.reduce_mean(tf.square(output - tf.random_uniform(shape=[output.get_shape().as_list()[0], 1], minval=0, maxval=0.2, dtype=tf.float32)))
+    # loss = posLoss+negLoss
     return discrim_loss
 
-def gen_loss(output,label,EPS):
-    loss1 = tf.reduce_mean(tf.square(output-label))
-    adversarial_loss = tf.reduce_mean(-tf.log(output + EPS))
+def gen_loss(output,label,dis_out,EPS,perceptual_mode):
+    loss_mse = tf.reduce_mean(tf.square(output-label))
 
+    if  perceptual_mode == 'VGG54':
+        with tf.name_scope('vgg19_1') as scope:
+            extracted_feature_gen = VGG19_slim(output, perceptual_mode, reuse=False, scope=scope)
+        with tf.name_scope('vgg19_2') as scope:
+            extracted_feature_target = VGG19_slim(label, perceptual_mode, reuse=True, scope=scope)
 
+    loss_vgg = tf.reduce_mean(tf.square(extracted_feature_gen-extracted_feature_target))
+    # loss2 = tf.reduce_mean(tf.square(discrNeg-tf.random_uniform(shape=[discrNeg.get_shape().as_list()[0],1],minval=0.9,maxval=1.1,dtype=tf.float32)))
+    adversarial_loss = tf.reduce_mean(-tf.log(dis_out + EPS))
+    gen_loss = loss_mse + 1e-3 * adversarial_loss + 2e-6*loss_vgg
+    return gen_loss
+
+def VGG19_slim(input, type, reuse,scope):
+    # Define the feature to extract according to the type of perceptual
+    if type == 'VGG54':
+        # target_layer = scope + 'vgg_19/conv5/conv5_4'
+        target_layer = 'vgg_19/conv5/conv5_4'
+    elif type == 'VGG22':
+        # target_layer = scope + 'vgg_19/conv2/conv2_2'
+        target_layer = 'vgg_19/conv2/conv2_2'
+    else:
+        raise NotImplementedError('Unknown perceptual type')
+    _, output = vgg_19(input, is_training=False, reuse=reuse)
+    output = output[target_layer]
+
+    return output
 ### vgg
 def vgg_19(inputs,
            num_classes=1000,
@@ -124,5 +148,4 @@ def vgg_19(inputs,
       # Use conv2d instead of fully_connected layers.
       # Convert end_points_collection into a end_point dict.
       end_points = slim.utils.convert_collection_to_dict(end_points_collection)
-
       return net, end_points
