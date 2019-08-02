@@ -24,7 +24,7 @@ parser.add_argument("--nubBlocks_ED",default=32,type=int)
 parser.add_argument("--nubBlocks_SR",default=16,type=int)
 parser.add_argument("--EDFILTER_DIM",default=256,type=int)
 parser.add_argument("--SPFILTER_DIM",default=64,type=int)
-parser.add_argument("--batch_size",default=8,type=int)
+parser.add_argument("--batch_size",default=10,type=int)
 parser.add_argument("--savenet_path",default='./libSaveNet/savenet/')
 parser.add_argument("--vgg_ckpt",default='./libSaveNet/vgg_ckpt/vgg_19.ckpt')
 parser.add_argument("--epoch",default=200000,type=int)
@@ -41,16 +41,18 @@ parser.add_argument("--perceptual_mode",default='VGG54')
 args = parser.parse_args()
 
 def train(args):
-    # train_set = dataset.get_files(args.train_file,crop_size=args.crop_size)
-    # test_set = dataset.get_files(args.test_file,crop_size=args.crop_size)
-    x_train, y_train = dataset.load_imgs(args.train_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=args.num_train)
-    x_test, y_test = dataset.load_imgs(args.test_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=args.num_test)
 
-    x = tf.placeholder(tf.float32,shape = [args.batch_size,args.shrunk_size,args.shrunk_size, 3])
-    y_ = tf.placeholder(tf.float32,shape = [args.batch_size,args.crop_size,args.crop_size,3])
-    y = model.generator(x,args=args)
+    # x_train, y_train = dataset.load_imgs(args.train_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=args.num_train)
+    # x_test, y_test = dataset.load_imgs(args.test_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=args.num_test)
+    x_train, y_train = dataset.load_faceimgs(args.train_file, scale=args.scale)
+    x_test, y_test = dataset.load_faceimgs(args.test_file,scale=args.scale)
+
+    x = tf.placeholder(tf.float32,shape = [args.batch_size,54,44,3])
+    y_ = tf.placeholder(tf.float32,shape = [args.batch_size,216,176,3])
+    # y = model.generator(x,args=args)
+    # loss = tf.reduce_mean(tf.square(y - y_))
+    y = model.RDN(x,name='RDN')
     loss = tf.reduce_mean(tf.square(y - y_))
-
 
     PSNR = compute_psnr(y,y_,convert=True)
 
@@ -100,7 +102,7 @@ def train(args):
                 test_writer.add_summary(sess.run(summary_op, feed_dict={x: batch_input_test,
                                                                      y_: batch_labels_test}), m)
             if (count + 1) % 10000 == 0:
-                saver.save(sess, os.path.join(args.savenet_path, 'conv_net%d.ckpt-done' % (count)))
+                saver.save(sess, os.path.join(args.savenet_path, 'conv_RDN%d.ckpt-done' % (count)))
 def GAN_train(args):
     # x_train, y_train = dataset.load_imgs(args.train_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=10000)
     # x_test, y_test = dataset.load_imgs(args.test_file, crop_size=args.crop_size, shrunk_size=args.shrunk_size,min=1000)
@@ -186,11 +188,11 @@ def GAN_train(args):
             if (count + 1) % 10000 == 0:
                 saver.save(sess, os.path.join(args.savenet_path, 'GAN_net%d.ckpt-done' % (count)))
 def test(args):
-    savepath = './libSaveNet/savenet/GAN_net149999.ckpt-done'
+    savepath = './libSaveNet/savenet/GAN_net9999.ckpt-done'
     path_2k = './data/valid/0801.png'
     path_set = './data/valid/comic.png'
     path_face2 = './data/valid/202441.jpg'
-    img = cv.imread(path_face2)
+    img = cv.imread(path_set)
     img_shape = np.shape(img)
     a_scale = img_shape[0]//args.scale
     b_scale = img_shape[1]//args.scale
@@ -223,9 +225,9 @@ def test(args):
     # cv.imwrite('./output/sp_img.png',output,0)
     # cv.imwrite('./output/lr_img.png',img_LR,0)
     # cv.imwrite('./output/hr_img.png',img,0)
-    print('loss_test:[%.8f],PSNR_train:[%.8f]' % (loss_test,PSNR_test))
+    print('loss_test:[%.8f],PSNR_test:[%.8f]' % (loss_test,PSNR_test))
 def predict(args):
-    savepath = './libSaveNet/savenet/GAN_net149999.ckpt-done'
+    savepath = './libSaveNet/savenet/GAN_net9999.ckpt-done'
     path_face = './data/valid/2019-04-18-09-33-59-828886_1.bmp'
     img = cv.imread(path_face)
     img = img / (255. / 2.) - 1
@@ -244,6 +246,7 @@ def predict(args):
 
 if __name__ == '__main__':
     # train(args)
+    # GAN_train(args)
+
     # test(args)
-    GAN_train(args)
-    # predict(args)
+    predict(args)

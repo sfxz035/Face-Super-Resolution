@@ -5,6 +5,9 @@ import random
 import scipy.misc
 import time
 batch_index = 0
+
+
+### super_resolution
 def get_files(file_dir,crop_size):
     imgs_coord = []
     img_files = os.listdir(file_dir)
@@ -21,9 +24,7 @@ def get_files(file_dir,crop_size):
     nub = str(len(imgs_coord))
     print('data number is '+nub)
     return imgs_coord
-
 def get_image(imgtuple,size):
-
     img = cv.imread(imgtuple[0])
     x,y = imgtuple[1]
     img = img[x*size:(x+1)*size,y*size:(y+1)*size]
@@ -80,6 +81,8 @@ def random_batch(x_data,y_data,batch_size):
     y_batch = y_data[rnd_indices][:]
     return x_batch, y_batch
 
+
+### face dataset
 def get_facefiles(file_dir):
     # file_dir: 文件夹路径
     # return: 文件夹下的所有文件名
@@ -126,3 +129,4 @@ def load_faceimgs(data_dir,scale,resize=False,min=None):
     # cv.imshow('b',target_seq[0][:])
     # cv.waitKey(0)
     return input_seq,target_seq
+

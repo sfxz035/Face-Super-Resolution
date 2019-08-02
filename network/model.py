@@ -16,6 +16,34 @@ def net(input,reuse = False,args=None,name='EDSR'):
         output = tf.clip_by_value(L_U+mean_x,0.0,255.0)
     return output
 
+def RDN(input,reuse=False,is_training=True,args=None,name='RDN'):
+    with tf.variable_scope(name,reuse=reuse):
+        F_1 = conv_b(input,64,name='conv2d_1')
+        F_0 = conv_b(F_1,64,name='conv2d_2')
+        rdb_list = []
+        rdb_in = F_0
+        for i in range(1,17):
+            x = rdb_in
+            for j in range(1,9):
+                tmp = conv_relu(x,64,name='RDB_'+str(i)+'_'+str(j))
+                x = tf.concat([x,tmp],axis=3)
+            x = conv_b(x,64,k_h=1,k_w=1,name='RDB_'+str(i))
+            rdb_in = x+rdb_in
+            rdb_list.append(rdb_in)
+        FD = tf.concat(rdb_list,axis=3)
+        FGF1 = conv_b(FD,64,k_h=1,k_w=1,name='conv2d_F1')
+        FGF2 = conv_b(FGF1,64,name='conv2d_F2')
+        FDF = tf.add(F_1,FGF2)
+
+        ### upsamlple
+        upsamp1 = conv_relu(FDF,64,name='conv_up1')
+        upsamp2 = conv_relu(upsamp1,32,name='conv_up2')
+        up = conv_b(upsamp2,48,name='conv_up3')
+        up = pixelShuffler(up,4)
+
+        conv_out = conv_b(up,3,name='conv_out')
+        return conv_out
+
 
 
 
@@ -31,10 +59,10 @@ def generator(input,reuse=False,is_training=True,args=None,name='SRResnet'):
             L2 = L2 +L1
         with tf.variable_scope('subpixelconv_stage1'):
             assert args.scale == 4
-            L3_U1 = conv_b(L2,args.SPFILTER_DIM*4,name='connv2d_U1')
+            L3_U1 = conv_b(L2,args.SPFILTER_DIM,name='connv2d_U1')
             L3_U1 = pixelShuffler(L3_U1,2)
             L3_U1 = PReLU(L3_U1,name='PReLU_U1')
-            L4_U2 = conv_b(L3_U1,args.SPFILTER_DIM*4,name='conv2d_U2')
+            L4_U2 = conv_b(L3_U1,args.SPFILTER_DIM,name='conv2d_U2')
             L4_U2 = pixelShuffler(L4_U2,2)
             L4_U2 = PReLU(L4_U2,name='PReLU_U2')
         with tf.variable_scope('ouput_stage'):
@@ -58,7 +86,7 @@ def discriminator(input,reuse=False,is_training=True,args=None,name='discriminat
         ### Dense
         L1_Dense = LReLU(tf.layers.dense(tf.layers.flatten(L7_block),units=512),leak=0.2,name='LReLU_Dense1')
         L2_Dense = tf.nn.sigmoid(tf.layers.dense(L1_Dense,units=1),name='sigmoid_Dense2')
-    return L2_Dense
+        return L2_Dense
 
 def discr_loss(output,label,EPS):
     ## 1
